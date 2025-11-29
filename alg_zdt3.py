@@ -95,14 +95,11 @@ class MOEAD:
                 
                 self.z_ideal = np.min(np.vstack((self.z_ideal, offspring_fit)), axis=0)
                 
-                # 4. Actualización de vecinos 
                 neighbors = self.neighborhood[i]
                 for j in neighbors:
-                    # Calculamos valor Tchebycheff para el hijo y para el vecino actual
                     g_te_offspring = self.tchebycheff(offspring_fit, j)
                     g_te_neighbor = self.tchebycheff(self.fitness_pop[j], j)
                     
-                    # Si el hijo mejora el subproblema j, reemplazamos
                     if g_te_offspring <= g_te_neighbor:
                         self.population[j] = offspring_x
                         self.fitness_pop[j] = offspring_fit
@@ -112,15 +109,9 @@ class MOEAD:
 
         return self.fitness_pop
 
-# ... (Mantén las clases ZDT3 y MOEAD igual que arriba)
-
-# --- EJECUCIÓN PRINCIPAL ---
 if __name__ == "__main__":
-    # Configuración según las diapositivas
     zdt3_problem = ZDT3(n_vars=30)
     
-    # CASO 1: 10000 evaluaciones (100 ind * 100 gen)
-    # CASO 2: 4000 evaluaciones (100 ind * 40 gen) -> Cambiar max_gen a 40
     pop_size = 100
     generations = 100 
     
@@ -128,18 +119,15 @@ if __name__ == "__main__":
     
     algorithm = MOEAD(problem=zdt3_problem, 
                       n_pop=pop_size, 
-                      n_neighbors=20, # 20% de la población [cite: 31]
+                      n_neighbors=20, 
                       max_gen=generations)
     
     final_front = algorithm.run()
     
-    # 1. GUARDAR DATOS NUMÉRICOS (Requisito del trabajo )
-    # Guardamos f1 y f2 en un archivo de texto
     filename_data = f"MOEAD_ZDT3_GEN_{generations}.txt"
     np.savetxt(filename_data, final_front, fmt='%.6f', header="f1  f2")
     print(f"\n[OK] Datos guardados en: {filename_data}")
 
-    # 2. GENERAR Y GUARDAR EL GRÁFICO (Solución a tu error)
     plt.figure(figsize=(10, 8))
     plt.scatter(final_front[:, 0], final_front[:, 1], c='red', s=15, label='Soluciones MOEA/D')
     plt.title(f'Frente de Pareto ZDT3 - {generations} Generaciones')
@@ -148,7 +136,6 @@ if __name__ == "__main__":
     plt.grid(True)
     plt.legend()
     
-    # En lugar de plt.show(), usamos savefig
     filename_plot = f"Grafica_ZDT3_GEN_{generations}.png"
     plt.savefig(filename_plot)
     print(f"[OK] Gráfico guardado en: {filename_plot}")
