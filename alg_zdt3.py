@@ -1,5 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import os
 
 class ZDT3:
@@ -23,9 +22,10 @@ class MOEAD:
         self.T = n_neighbors     
         self.max_gen = max_gen   
         
-        self.CR = 0.5 
-        self.F = 0.5
-        self.eta_m = 20 
+        # Parámetros ajustados para MOEA/D-DE estándar
+        self.CR = 1.0   # Probabilidad de cruce (1.0 suele ir bien con DE para MOEA/D)
+        self.F = 0.5    # Factor de escala
+        self.eta_m = 20 # Índice de distribución para mutación polinómica
         
         self.weights = None
         self.neighborhood = None
@@ -39,6 +39,7 @@ class MOEAD:
             self.weights[i, 0] = i / (self.N - 1)
             self.weights[i, 1] = 1.0 - self.weights[i, 0]
         
+        # Evitar división por cero
         self.weights[self.weights == 0] = 0.0001
 
         dists = np.zeros((self.N, self.N))
@@ -54,25 +55,76 @@ class MOEAD:
         self.z_ideal = np.min(self.fitness_pop, axis=0)
 
     def tchebycheff(self, fitness, weight_idx):
+        # Tchebycheff simple (sin normalización dinámica compleja para mantenerlo simple)
         diff = np.abs(fitness - self.z_ideal)
         weighted_diff = self.weights[weight_idx] * diff
         return np.max(weighted_diff)
 
+    def polynomial_mutation(self, x):
+        """Aplica mutación polinómica para refinamiento local"""
+        pm = 1.0 / self.problem.n_vars
+        x_mut = x.copy()
+        
+        # Máscara para decidir qué variables mutar
+        mask = np.random.random(x.shape) < pm
+        
+        if not np.any(mask):
+            return x_mut
+            
+        lower = self.problem.bound_min
+        upper = self.problem.bound_max
+        
+        for i in np.where(mask)[0]:
+            val = x[i]
+            delta_1 = (val - lower[i]) / (upper[i] - lower[i])
+            delta_2 = (upper[i] - val) / (upper[i] - lower[i])
+            
+            rand = np.random.random()
+            mut_pow = 1.0 / (self.eta_m + 1.0)
+            
+            if rand < 0.5:
+                xy = 1.0 - delta_1
+                val_add = 2.0 * rand + (1.0 - 2.0 * rand) * (xy ** (self.eta_m + 1.0))
+                delta_q = (val_add ** mut_pow) - 1.0
+            else:
+                xy = 1.0 - delta_2
+                val_add = 2.0 * (1.0 - rand) + 2.0 * (rand - 0.5) * (xy ** (self.eta_m + 1.0))
+                delta_q = 1.0 - (val_add ** mut_pow)
+                
+            x_mut[i] = val + delta_q * (upper[i] - lower[i])
+            
+        return np.clip(x_mut, lower, upper)
+
     def evolution_operator_DE(self, idx_subproblem):
+        # 1. Selección de vecinos para DE
         neighbors = self.neighborhood[idx_subproblem]
-        r1, r2, r3 = np.random.choice(neighbors, 3, replace=False)
         
-        x_r1 = self.population[r1]
-        x_r2 = self.population[r2]
-        x_r3 = self.population[r3]
+        # Necesitamos 3 vectores distintos entre ellos
+        idxs = np.random.choice(neighbors, 3, replace=False)
+        x_r1, x_r2, x_r3 = self.population[idxs[0]], self.population[idxs[1]], self.population[idxs[2]]
         
+        # 2. Mutación Diferencial (DE/rand/1)
         mutant = x_r1 + self.F * (x_r2 - x_r3)
-        offspring = np.clip(mutant, self.problem.bound_min, self.problem.bound_max)
+        
+        # 3. Cruce Binomial (Uso de CR) - ESTO FALTABA
+        target = self.population[idx_subproblem]
+        cross_mask = np.random.random(self.problem.n_vars) <= self.CR
+        
+        # Asegurar que al menos una variable cambie
+        j_rand = np.random.randint(0, self.problem.n_vars)
+        cross_mask[j_rand] = True
+        
+        trial = np.where(cross_mask, mutant, target)
+        trial = np.clip(trial, self.problem.bound_min, self.problem.bound_max)
+        
+        # 4. Mutación Polinómica (Para salir de óptimos locales y afinar) - ESTO FALTABA
+        offspring = self.polynomial_mutation(trial)
+        
         return offspring
 
     def run(self, file_all_path=None):
         self.initialize()
-        nr = 2 
+        nr = 2 # Límite de reemplazo para mantener diversidad (Spacing)
         
         f_all = None
         if file_all_path:
@@ -81,6 +133,7 @@ class MOEAD:
 
         for gen in range(self.max_gen):
             for i in range(self.N): 
+                # Ahora usa el operador DE completo + Mutación Polinómica
                 offspring_x = self.evolution_operator_DE(i)
                 offspring_fit = self.problem.evaluate(offspring_x)
                 
@@ -102,6 +155,7 @@ class MOEAD:
                         self.fitness_pop[j] = offspring_fit
                         count += 1
             
+            # Guardar histórico si se solicita
             if f_all:
                 f_all.write(f"# gen = {gen + 1}\n")
                 for fit in self.fitness_pop:
@@ -113,19 +167,20 @@ class MOEAD:
         return self.fitness_pop
 
 if __name__ == "__main__":
+    # Configuraciones originales
     configuraciones = [
         (40, 100),   
         (100, 100)   
     ]
     
     num_ejecuciones = 10
-    output_dir = "RESULTADOS_MOEAD"
+    output_dir = "RESULTADOS_MOEAD_MEJORADO" # Carpeta nueva para no mezclar
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     zdt3_problem = ZDT3(n_vars=30)
 
-    print(f"--- Iniciando Batería de Pruebas MOEA/D ---")
+    print(f"--- Iniciando Batería de Pruebas MOEA/D MEJORADO ---")
 
     for pop_size, generations in configuraciones:
         print(f"\nProcesando Configuración: Población={pop_size}, Generaciones={generations}")
@@ -141,11 +196,13 @@ if __name__ == "__main__":
                               n_neighbors=n_vecinos, 
                               max_gen=generations)
             
+            # Nombre de archivos
             filename_all = f"zdt3_all_moead_P{pop_size}G{generations}_seed{semilla:02d}.out"
             filepath_all = os.path.join(output_dir, filename_all)
 
             final_front = algorithm.run(file_all_path=filepath_all)
             
+            # Preparar formato metrics
             n_soluciones = final_front.shape[0]
             col_zeros = np.zeros((n_soluciones, 1))
             datos_metrics = np.hstack((final_front, col_zeros))
@@ -155,6 +212,6 @@ if __name__ == "__main__":
             
             np.savetxt(filepath_final, datos_metrics, fmt='%.6e', delimiter='\t')
             
-            print(f"  > Ejecución {i}/{num_ejecuciones} terminada. Guardados: {filename_final} y {filename_all}")
+            print(f"  > Ejecución {i}/{num_ejecuciones} terminada.")
 
-    print(f"\n[FIN] Todos los archivos generados en la carpeta '{output_dir}'.")
+    print(f"\n[FIN] Resultados en '{output_dir}'.")
