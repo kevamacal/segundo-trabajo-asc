@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 class ZDT3:
     def __init__(self, n_vars=30):
@@ -55,19 +56,11 @@ class MOEAD:
         self.z_ideal = np.min(self.fitness_pop, axis=0)
 
     def tchebycheff(self, fitness, weight_idx):
-        """
-        Calcula el valor escalar g_te según 
-        max_i { lambda_i * | f_i(x) - z_i* | }
-        """
         diff = np.abs(fitness - self.z_ideal)
         weighted_diff = self.weights[weight_idx] * diff
         return np.max(weighted_diff)
 
     def evolution_operator_DE(self, idx_subproblem):
-        """
-        Operador de Cruce Diferencial (DE) sugerido en [cite: 77, 79]
-        v = x_r1 + F * (x_r2 - x_r3)
-        """
         neighbors = self.neighborhood[idx_subproblem]
         r1, r2, r3 = np.random.choice(neighbors, 3, replace=False)
         
@@ -76,21 +69,17 @@ class MOEAD:
         x_r3 = self.population[r3]
         
         mutant = x_r1 + self.F * (x_r2 - x_r3)
-        
         offspring = np.clip(mutant, self.problem.bound_min, self.problem.bound_max)
-        
         return offspring
 
     def run(self):
         self.initialize()
-        
-        print(f"Iniciando evolución por {self.max_gen} generaciones...")
+        # Comentamos los prints para no saturar la consola en ejecuciones múltiples
+        # print(f"Iniciando evolución por {self.max_gen} generaciones...")
         
         for gen in range(self.max_gen):
             for i in range(self.N): 
-                
                 offspring_x = self.evolution_operator_DE(i)
-                
                 offspring_fit = self.problem.evaluate(offspring_x)
                 
                 self.z_ideal = np.min(np.vstack((self.z_ideal, offspring_fit)), axis=0)
@@ -104,39 +93,65 @@ class MOEAD:
                         self.population[j] = offspring_x
                         self.fitness_pop[j] = offspring_fit
             
-            if gen % 20 == 0:
-                print(f"Generación {gen}/{self.max_gen} completada.")
-
         return self.fitness_pop
 
+# =============================================================================
+# BLOQUE PRINCIPAL MODIFICADO PARA GENERAR ARCHIVOS COMPATIBLES CON METRICS
+# =============================================================================
 if __name__ == "__main__":
-    zdt3_problem = ZDT3(n_vars=30)
+    # Definimos las dos configuraciones que pide la práctica para comparar
+    # (Población, Generaciones)
+    configuraciones = [
+        (40, 100),   # Escenario 4000 evaluaciones (carpeta P40G100)
+        (100, 100)   # Escenario 10000 evaluaciones (carpeta P100G100)
+    ]
     
-    pop_size = 100
-    generations = 100 
+    # Número de ejecuciones independientes (semillas)
+    num_ejecuciones = 10
     
-    print(f"Configuración: Población={pop_size}, Generaciones={generations}")
-    
-    algorithm = MOEAD(problem=zdt3_problem, 
-                      n_pop=pop_size, 
-                      n_neighbors=20, 
-                      max_gen=generations)
-    
-    final_front = algorithm.run()
-    
-    filename_data = f"MOEAD_ZDT3_GEN_{generations}.txt"
-    np.savetxt(filename_data, final_front, fmt='%.6f', header="f1  f2")
-    print(f"\n[OK] Datos guardados en: {filename_data}")
+    # Crear carpeta para guardar resultados si no existe
+    output_dir = "RESULTADOS_MOEAD"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    plt.figure(figsize=(10, 8))
-    plt.scatter(final_front[:, 0], final_front[:, 1], c='red', s=15, label='Soluciones MOEA/D')
-    plt.title(f'Frente de Pareto ZDT3 - {generations} Generaciones')
-    plt.xlabel('f1')
-    plt.ylabel('f2')
-    plt.grid(True)
-    plt.legend()
-    
-    filename_plot = f"Grafica_ZDT3_GEN_{generations}.png"
-    plt.savefig(filename_plot)
-    print(f"[OK] Gráfico guardado en: {filename_plot}")
-    print("Proceso finalizado.")
+    zdt3_problem = ZDT3(n_vars=30)
+
+    print(f"--- Iniciando Batería de Pruebas MOEA/D ---")
+
+    for pop_size, generations in configuraciones:
+        print(f"\nProcesando Configuración: Población={pop_size}, Generaciones={generations}")
+        
+        for i in range(1, num_ejecuciones + 1):
+            semilla = i
+            np.random.seed(semilla) # Fijar semilla para reproducibilidad
+            
+            # Instanciar y ejecutar algoritmo
+            # Ajustamos n_neighbors proporcionalmente si la población es muy pequeña (opcional)
+            n_vecinos = 20 if pop_size >= 20 else int(pop_size/2)
+            
+            algorithm = MOEAD(problem=zdt3_problem, 
+                              n_pop=pop_size, 
+                              n_neighbors=n_vecinos, 
+                              max_gen=generations)
+            
+            final_front = algorithm.run()
+            
+            # --- PREPARACIÓN FORMATO PARA ./metrics ---
+            # El software metrics suele requerir: f1 f2 constraint_violation
+            # En ZDT3 no hay constraints, así que la 3ra columna es 0.0
+            n_soluciones = final_front.shape[0]
+            col_zeros = np.zeros((n_soluciones, 1))
+            datos_metrics = np.hstack((final_front, col_zeros))
+            
+            # Nombre de archivo similar al de NSGA-II para facilitar scripts
+            # Formato: zdt3_final_moead_P{pop}G{gen}_seed{seed}.out
+            filename = f"zdt3_final_moead_P{pop_size}G{generations}_seed{semilla:02d}.out"
+            filepath = os.path.join(output_dir, filename)
+            
+            # Guardar SIN encabezado y con separador de espacio/tabulador
+            np.savetxt(filepath, datos_metrics, fmt='%.6e', delimiter='\t')
+            
+            print(f"  > Ejecución {i}/{num_ejecuciones} terminada. Guardado: {filename}")
+
+    print(f"\n[FIN] Todos los archivos generados en la carpeta '{output_dir}'.")
+    print("Ahora copia estos archivos a tu carpeta de ./metrics en Linux para compararlos.")
