@@ -3,24 +3,22 @@ import random
 import math
 import copy
 import matplotlib.pyplot as plt
+import os  # Import necesario para gestionar carpetas
 
 # --- CONFIGURACIÓN DEL PROBLEMA (ZDT3) ---
 NUM_VARS = 30
 NUM_OBJS = 2
-X_L = 0.0 # Límite inferior
-X_U = 1.0 # Límite superior
+X_L = 0.0 
+X_U = 1.0 
 
-# --- PARÁMETROS DEL ALGORITMO ---
-POP_SIZE = 100       # Tamaño de población (N)
-MAX_EVALUACIONES = 4000 # Presupuesto de evaluaciones
-T_SIZE = 20          # Tamaño vecindad (20% de 100)
-DE_F = 0.5           # DE Factor F
-DE_CR = 0.5          # DE Crossover CR
-MUT_SIG = 20.0       # Parametro SIG para mutación Gaussiana
-MUT_PR = 1.0 / NUM_VARS # Probabilidad mutación
-
-# Nombre del fichero de salida para métricas (formato .out)
-OUTPUT_FILENAME = "eval_moead.out"
+# --- PARÁMETROS FIJOS ---
+# Nota: POP_SIZE se pasa ahora como argumento para ser flexible, 
+# pero por defecto usaremos 100 como tenías.
+T_SIZE = 20           
+DE_F = 0.5           
+DE_CR = 0.5          
+MUT_SIG = 20.0       
+MUT_PR = 1.0 / NUM_VARS 
 
 class Solucion:
     def __init__(self, vector=None):
@@ -40,9 +38,9 @@ class Solucion:
         self.f = np.array([f1, f2])
         self.evaluated = True
         
-        # --- GUARDAR EVALUACIÓN EN FICHERO (Formato exacto NSGA-II) ---
+        # --- GUARDAR EVALUACIÓN EN FICHERO ---
         if file_handle:
-            # Formato: f1 \t f2 \t constr_violation(0.0) en notación científica
+            # Formato: f1 \t f2 \t constr_violation(0.0)
             file_handle.write(f"{f1:.6e}\t{f2:.6e}\t0.000000e+00\n")
 
 def distancia_euclidea(vec1, vec2):
@@ -68,53 +66,62 @@ def domina(sol_a, sol_b):
             mejor_en_algo = True
     return mejor_en_algo
 
-def main():
-    print(f"Iniciando MOEA/D. Guardando evaluaciones en '{OUTPUT_FILENAME}'...")
+def ejecutar_moead(semilla, max_evaluaciones, carpeta, pop_size):
+    """
+    Ejecuta una instancia de MOEA/D con una semilla y configuración específica.
+    """
+    # 1. Fijar semilla para reproducibilidad
+    random.seed(semilla)
+    np.random.seed(semilla)
     
-    # Abrir fichero para escribir todas las evaluaciones
-    with open(OUTPUT_FILENAME, "w") as f_out:
+    nombre_fichero = os.path.join(carpeta, f"eval_seed_{semilla}.out")
+    nombre_grafica = os.path.join(carpeta, f"grafica_seed_{semilla}.png")
+    
+    print(f"   -> Ejecutando Semilla {semilla}: {max_evaluaciones} evals. Guardando en {nombre_fichero}")
+
+    with open(nombre_fichero, "w") as f_out:
         
-        # 1. INICIALIZACIÓN
+        # --- INICIALIZACIÓN ---
         lambdas = []
-        for i in range(POP_SIZE):
-            l1 = i / (POP_SIZE - 1)
+        for i in range(pop_size):
+            l1 = i / (pop_size - 1)
             l2 = 1.0 - l1
             lambdas.append(np.array([l1, l2]))
         lambdas = np.array(lambdas)
 
         vecindades = []
-        for i in range(POP_SIZE):
+        for i in range(pop_size):
             distancias = []
-            for j in range(POP_SIZE):
+            for j in range(pop_size):
                 dist = distancia_euclidea(lambdas[i], lambdas[j])
                 distancias.append((dist, j))
             distancias.sort(key=lambda x: x[0])
             indices_vecinos = [x[1] for x in distancias[:T_SIZE]]
             vecindades.append(indices_vecinos)
 
-        poblacion = [Solucion() for _ in range(POP_SIZE)]
+        poblacion = [Solucion() for _ in range(pop_size)]
         z_ideal = np.full(NUM_OBJS, float('inf'))
 
         evaluaciones = 0
         
-        # Evaluar población inicial y guardar
+        # Evaluar población inicial
         for ind in poblacion:
-            ind.evaluar(file_handle=f_out) # Pasamos el fichero para guardar
+            ind.evaluar(file_handle=f_out)
             evaluaciones += 1
             for k in range(NUM_OBJS):
                 if ind.f[k] < z_ideal[k]:
                     z_ideal[k] = ind.f[k]
 
-        ep = []
+        ep = [] # External Population
 
-        # Bucle principal
+        # --- BUCLE PRINCIPAL ---
         generacion = 1
-        while evaluaciones < MAX_EVALUACIONES:
-            for i in range(POP_SIZE):
-                if evaluaciones >= MAX_EVALUACIONES:
+        while evaluaciones < max_evaluaciones:
+            for i in range(pop_size):
+                if evaluaciones >= max_evaluaciones:
                     break
 
-                # Reproducción
+                # Selección y Reproducción
                 idxs = vecindades[i]
                 seleccion = random.sample(idxs, 3)
                 r1, r2, r3 = poblacion[seleccion[0]], poblacion[seleccion[1]], poblacion[seleccion[2]]
@@ -127,6 +134,7 @@ def main():
                     if random.random() < DE_CR or j == j_rand:
                         vector_u[j] = vector_v[j]
 
+                # Mutación Polinómica / Gaussiana
                 for j in range(NUM_VARS):
                     if random.random() < MUT_PR:
                         sigma = (X_U - X_L) / MUT_SIG
@@ -134,16 +142,17 @@ def main():
 
                 vector_u = np.clip(vector_u, X_L, X_U)
 
-                # Evaluación y Guardado
+                # Evaluar hijo
                 nuevo_ind = Solucion(vector_u)
-                nuevo_ind.evaluar(file_handle=f_out) # AQUÍ SE GUARDA LA EVALUACIÓN
+                nuevo_ind.evaluar(file_handle=f_out)
                 evaluaciones += 1
 
-                # Actualización
+                # Actualizar Z ideal
                 for k in range(NUM_OBJS):
                     if nuevo_ind.f[k] < z_ideal[k]:
                         z_ideal[k] = nuevo_ind.f[k]
 
+                # Actualizar Vecinos
                 for j_vecino in idxs:
                     g_te_nuevo = tchebycheff(nuevo_ind, lambdas[j_vecino], z_ideal)
                     g_te_viejo = tchebycheff(poblacion[j_vecino], lambdas[j_vecino], z_ideal)
@@ -151,7 +160,7 @@ def main():
                     if g_te_nuevo <= g_te_viejo:
                         poblacion[j_vecino] = copy.deepcopy(nuevo_ind)
 
-                # EP Update
+                # Actualizar EP (External Population)
                 es_dominado = False
                 remover = []
                 for sol_ep in ep:
@@ -168,23 +177,52 @@ def main():
 
             generacion += 1
 
-    # --- VISUALIZACIÓN FINAL ---
-    print(f"Fin. Evaluaciones: {evaluaciones}")
-    print(f"Fichero '{OUTPUT_FILENAME}' generado correctamente.")
-    
-    final_set = ep
+    # --- GUARDAR GRÁFICA (SIN MOSTRAR VENTANA PARA NO BLOQUEAR EL BUCLE) ---
+    final_set = ep if len(ep) > 0 else poblacion # Si EP está vacío por alguna razón, usar población final
     f1_vals = [sol.f[0] for sol in final_set]
     f2_vals = [sol.f[1] for sol in final_set]
 
     plt.figure(figsize=(10, 6))
-    plt.scatter(f1_vals, f2_vals, c='red', label='MOEA/D (EP Final)')
+    plt.scatter(f1_vals, f2_vals, c='blue', s=10, label=f'Seed {semilla}')
     plt.xlabel('f1')
     plt.ylabel('f2')
-    plt.title('Frente de Pareto ZDT3 - MOEA/D')
-    plt.legend()
+    plt.title(f'Pareto ZDT3 - Evals: {max_evaluaciones} - Seed: {semilla}')
     plt.grid(True)
-    plt.savefig("Grafica_MOEAD_Final.png")
-    plt.show()
+    plt.savefig(nombre_grafica)
+    plt.close() # Importante cerrar la figura para liberar memoria
+
+def main():
+    # CONFIGURACIÓN DE EXPERIMENTOS
+    NUM_EJECUCIONES = 10  # Número de semillas (seeds) a generar por configuración
+    
+    # Definimos los escenarios: (Max Evaluaciones, Carpeta Destino, Tamaño Población)
+    escenarios = [
+        {"evals": 4000,  "carpeta": "EVAL4000",  "pop": 100},
+        {"evals": 10000, "carpeta": "EVAL10000", "pop": 100} 
+    ]
+
+    print("--- INICIANDO GENERACIÓN AUTOMÁTICA DE SEMILLAS ---")
+
+    for escenario in escenarios:
+        max_evals = escenario["evals"]
+        carpeta = escenario["carpeta"]
+        pop = escenario["pop"]
+        
+        # Crear carpeta si no existe
+        if not os.path.exists(carpeta):
+            os.makedirs(carpeta)
+            print(f"Carpeta creada: {carpeta}")
+        else:
+            print(f"Usando carpeta existente: {carpeta}")
+
+        print(f"Iniciando lote de {NUM_EJECUCIONES} ejecuciones para {max_evals} evaluaciones...")
+
+        for i in range(NUM_EJECUCIONES):
+            # La semilla 'i' asegura que cada ejecución sea diferente pero reproducible
+            ejecutar_moead(semilla=i, max_evaluaciones=max_evals, carpeta=carpeta, pop_size=pop)
+
+    print("\n--- PROCESO FINALIZADO ---")
+    print(f"Se han generado {NUM_EJECUCIONES} ficheros en 'EVAL4000' y {NUM_EJECUCIONES} en 'EVAL10000'.")
 
 if __name__ == "__main__":
     main()
